@@ -13,20 +13,17 @@ twimlRouter.post('/twiml/:callId', requireTwilioSignature, (req, res) => {
 
   const wsUrl = `${publicWsUrl()}/ws/${callId}`;
 
-  // §3.3 S9.4 — a second <Language> child registers the Japanese fallback
-  // config so a mid-call `{type:"language"}` WS message can switch without
-  // a second round trip. ElevenLabs' flash_v2_5 model is multilingual (32
-  // languages, confirmed via /v1/models), so the same voice ID covers
-  // Japanese too — no separate JP voice needed. Unverified against a real
-  // Japanese call yet; budget one live test to confirm pronunciation (same
-  // caveat CLAUDE.md §3.3 flags for this feature).
+  // §3.3 S9.4 — a second <Language> child registers a DEDICATED Japanese
+  // voice, so a mid-call `{type:"language"}` WS message switches to a
+  // native Japanese voice rather than forcing the English voice through a
+  // multilingual model (which was producing romaji/mixed-language output).
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <ConversationRelay
       url="${wsUrl}"
       ttsProvider="${config.tts.provider}"
-      voice="${config.tts.voice}"
+      voice="${config.tts.voiceEn}"
       transcriptionProvider="${config.transcriptionProvider}"
       interruptible="any"
       reportInputDuringAgentSpeech="dtmf"
@@ -34,7 +31,7 @@ twimlRouter.post('/twiml/:callId', requireTwilioSignature, (req, res) => {
       <Language
         code="ja-JP"
         ttsProvider="${config.tts.provider}"
-        voice="${config.tts.voice}"
+        voice="${config.tts.voiceJa}"
         transcriptionProvider="${config.transcriptionProvider}"
       />
     </ConversationRelay>

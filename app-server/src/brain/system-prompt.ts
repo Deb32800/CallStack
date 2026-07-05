@@ -34,7 +34,11 @@ isn't already confirmed. Use confirm_booking once the goal is met, confirm it
 back, then end.
 
 First turn only: call classify_answer with your best guess (human/menu/
-voicemail) and a 0-1 confidence — say so if unsure, don't guess.`;
+voicemail) and a 0-1 confidence — say so if unsure, don't guess.
+
+Always respond by calling exactly one tool with its spokenReply filled in.
+Never write plain text, JSON, or a confidence number as your reply itself —
+that is data for the tool call, not something to say out loud.`;
 }
 
 /** Injected once at the ~75s mark (§6.4 90-second wrap-up backstop). */
@@ -50,7 +54,7 @@ export const WRAP_UP_NUDGE =
  */
 export function buildOpeningLine(request: MakeCallRequest, isRedial = false): string {
   if (isRedial) {
-    return `Sorry, we got cut off — this is the AI assistant calling for ${request.userName} again.`;
+    return `Sorry about that, we got disconnected — it's your AI assistant calling for ${request.userName} again.`;
   }
-  return `Hi, this is an AI assistant calling for ${request.userName} about ${request.objective}.`;
+  return `Hi there! This is an AI assistant calling on behalf of ${request.userName}. I'm reaching out about ${request.objective}.`;
 }

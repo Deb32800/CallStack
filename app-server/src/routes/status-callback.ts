@@ -17,6 +17,13 @@ statusCallbackRouter.post('/status/:callId', requireTwilioSignature, (req, res) 
 
   const callStatus = req.body?.CallStatus as string | undefined;
 
+  // A call already finalized (goal met, voicemail left, etc. via the ws
+  // handler) must never be re-finalized by a later or duplicate status
+  // webhook — this actually happened live: a fully successful call with a
+  // clean "goodbye" got its receipt overwritten to outcome "busy" by a
+  // webhook that arrived after the call had already ended cleanly.
+  const alreadyEnded = state.machine === 'END';
+
   switch (callStatus) {
     case 'ringing':
       broadcastStatus(callId, 'ringing', state.machine);
@@ -26,23 +33,29 @@ statusCallbackRouter.post('/status/:callId', requireTwilioSignature, (req, res) 
       broadcastMilestone(callId, 'Call answered');
       break;
     case 'busy':
-      broadcastMilestone(callId, 'Line busy');
-      finalizeCall(callId, 'busy');
+      if (!alreadyEnded) {
+        broadcastMilestone(callId, 'Line busy');
+        finalizeCall(callId, 'busy');
+      }
       break;
     case 'no-answer':
-      broadcastMilestone(callId, 'No answer');
-      finalizeCall(callId, 'no_answer');
+      if (!alreadyEnded) {
+        broadcastMilestone(callId, 'No answer');
+        finalizeCall(callId, 'no_answer');
+      }
       break;
     case 'failed':
     case 'canceled':
-      broadcastMilestone(callId, 'Call failed');
-      finalizeCall(callId, 'failed');
+      if (!alreadyEnded) {
+        broadcastMilestone(callId, 'Call failed');
+        finalizeCall(callId, 'failed');
+      }
       break;
     case 'completed':
       // Normal hangup. If the ws end-handler hasn't already finalized this
       // call (goal met / voicemail / etc.), treat it as a clean end with
       // nothing more to do rather than leaving it dangling.
-      if (state.machine !== 'END') {
+      if (!alreadyEnded) {
         finalizeCall(callId, 'nothing_more_to_do');
       }
       break;

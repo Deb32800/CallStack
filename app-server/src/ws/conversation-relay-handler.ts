@@ -58,32 +58,29 @@ function speak(ws: WebSocket, callId: string, text: string): void {
 
 const LANGUAGE_CODES: Record<CallLanguage, string> = { en: 'en-US', ja: 'ja-JP' };
 
+const JAPANESE_SCRIPT_REMINDER =
+  'CRITICAL: write spokenReply in Japanese script (hiragana/katakana/kanji) ' +
+  'ONLY. Do not use any Latin letters, English words, or romaji anywhere in ' +
+  'it. One short natural sentence, real Japanese characters only.';
+
 /**
- * §3.3 S9.4 — mid-call EN/JP switch. Cheap regex detection (no extra LLM
- * call) on the caller's transcribed text; on a change, send Twilio's
- * dedicated `language` WS message and tell the brain (via a system message,
- * folded in on the next runBrainTurn) to reply in that language from now on.
+ * §3.3 S9.4 — mid-call EN/JP switch, detected purely from what the caller
+ * just said (no stickiness — see decision/language-detect.ts). Sends
+ * Twilio's dedicated `language` WS message whenever the target changes and
+ * updates the tracked state; the actual per-turn instruction to the model
+ * is applied separately in runBrainTurn, positioned as the LAST message
+ * before generation (recency matters a lot for a small model's compliance).
  */
-function maybeSwitchLanguage(ws: WebSocket, callId: string, callerText: string): void {
-  if (!callerText) return;
-  const detected = detectLanguage(callerText);
+function maybeSwitchLanguage(ws: WebSocket, callId: string, callerText: string): CallLanguage {
   const current = currentLanguage.get(callId) ?? 'en';
-  if (detected === current) return;
-
-  currentLanguage.set(callId, detected);
-  const code = LANGUAGE_CODES[detected];
-  send(ws, { type: 'language', ttsLanguage: code, transcriptionLanguage: code });
-
-  const history = messageHistory.get(callId);
-  if (history) {
-    history.push({
-      role: 'system',
-      content:
-        detected === 'ja'
-          ? 'The caller switched to Japanese — reply in Japanese from now on.'
-          : 'The caller switched to English — reply in English from now on.',
-    });
+  if (!callerText) return current;
+  const detected = detectLanguage(callerText);
+  if (detected !== current) {
+    currentLanguage.set(callId, detected);
+    const code = LANGUAGE_CODES[detected];
+    send(ws, { type: 'language', ttsLanguage: code, transcriptionLanguage: code });
   }
+  return detected;
 }
 
 export function handleConversationRelayConnection(
@@ -142,7 +139,6 @@ async function handleMessage(
     case 'prompt': {
       const text = msg.voicePrompt ?? '';
       broadcastTranscript(callId, { role: 'other_party', text, ts: Date.now() });
-      maybeSwitchLanguage(ws, callId, text);
       await runBrainTurn(ws, callId, text);
       return;
     }
@@ -214,7 +210,16 @@ async function runBrainTurn(
 
   if (callerText) history.push({ role: 'user', content: callerText });
 
-  const result = await getBrainTurn(history);
+  // §3.3 S9.4 — detect language from what was just said, THEN place the
+  // Japanese-script instruction as the very last message before generation
+  // (a one-time nudge earlier in history wasn't sticky enough — recency
+  // matters much more for a small model's compliance).
+  const language = maybeSwitchLanguage(ws, callId, callerText);
+  if (language === 'ja') {
+    history.push({ role: 'system', content: JAPANESE_SCRIPT_REMINDER });
+  }
+
+  const result = await getBrainTurn(history, language);
 
   // A newer turn (interrupt/redial) superseded this one — drop it.
   if (activeTurnId.get(callId) !== myTurnId) return;

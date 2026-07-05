@@ -23,6 +23,18 @@ subscribeRouter.get('/calls/:callId/events', requireSharedSecret, (req, res) => 
     Connection: 'keep-alive',
   });
 
+  // Replay current state immediately so a late subscriber doesn't miss a
+  // result that already landed (e.g. the call finished before this request
+  // arrived). Handled as its own plain write+end — NOT through the `send`
+  // closure below, which references `keepalive`/`unsubscribe` that don't
+  // exist yet on this path and would throw a TDZ ReferenceError before
+  // res.end() ever ran, leaving the response hanging open forever.
+  if (state.receipt) {
+    res.write(`data: ${JSON.stringify({ type: 'result', callId, receipt: state.receipt })}\n\n`);
+    res.end();
+    return;
+  }
+
   const send = (event: unknown) => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
     if ((event as { type?: string }).type === 'result') {
@@ -31,14 +43,6 @@ subscribeRouter.get('/calls/:callId/events', requireSharedSecret, (req, res) => 
       res.end();
     }
   };
-
-  // Replay current state immediately so a late subscriber doesn't miss
-  // a result that already landed (e.g. reconnect after a network blip).
-  if (state.receipt) {
-    send({ type: 'result', callId, receipt: state.receipt });
-    res.end();
-    return;
-  }
 
   const unsubscribe = subscribe(callId, send);
 

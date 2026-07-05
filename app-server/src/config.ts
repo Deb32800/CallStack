@@ -26,8 +26,11 @@ export const config = {
   },
   tts: {
     provider: process.env.TTS_PROVIDER || 'ElevenLabs',
-    voice:
-      process.env.TTS_VOICE || 'ZF6FPAbjXT4488VcRRnw-flash_v2_5-1.2_1.0_1.0',
+    // §3.3 S9.4 — dedicated voice per language, not one voice forced
+    // through a multilingual model. A native Japanese voice pronounces
+    // Japanese far more naturally than an English voice speaking it.
+    voiceEn: process.env.TTS_VOICE_EN || 'ZF6FPAbjXT4488VcRRnw-flash_v2_5-1.2_1.0_1.0',
+    voiceJa: process.env.TTS_VOICE_JA || process.env.TTS_VOICE_EN || 'ZF6FPAbjXT4488VcRRnw-flash_v2_5-1.2_1.0_1.0',
     elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || '',
   },
   transcriptionProvider: process.env.TRANSCRIPTION_PROVIDER || 'google',
