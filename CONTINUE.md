@@ -44,15 +44,17 @@ Not done / deliberately cut:
   project, PID varies, `next-server (v16.1.6)`). The app-server runs on
   **3001** here — `.env` has `PORT=3001`. Don't "fix" this by killing that
   process; it's not part of this project.
-- **ngrok URL is ephemeral.** Every time the tunnel restarts, the URL
-  changes. When that happens, update it in BOTH places:
-  1. `.env` → `APP_SERVER_PUBLIC_URL`
-  2. `~/Library/Application Support/Claude/claude_desktop_config.json` →
-     `mcpServers.callstack.env.APP_SERVER_PUBLIC_URL`
-  Then restart the app-server (env is loaded once at boot) and restart
-  Claude Desktop (same reason).
+- **ngrok uses a reserved static domain**: `catcall-desktop-mankind.ngrok-free.dev`
+  (free-tier perk, claimed on this account). Always start the tunnel pinned
+  to it explicitly: `ngrok http --url=https://catcall-desktop-mankind.ngrok-free.dev 3001`.
+  Because it's static, `.env`'s `APP_SERVER_PUBLIC_URL` and the Claude
+  Desktop config's `mcpServers.callstack.env.APP_SERVER_PUBLIC_URL` don't
+  need updating across restarts — only the app-server itself needs a
+  restart after a code/env change.
 - ngrok requires `ngrok config add-authtoken <token>` once per machine
   (account is free, token from https://dashboard.ngrok.com/get-started/your-authtoken).
+  On a NEW machine, this reserved domain is tied to the ngrok account, not
+  the machine, so the same `--url=` flag works there too once authed.
 - Twilio account is a **Trial** account — can only dial pre-verified numbers
   (Console → Phone Numbers → Verified Caller IDs). +819091644892 and
   +817044836092 are verified as of 2026-07-05.
@@ -72,7 +74,8 @@ cp .env.example .env
 # ngrok (only if not already installed/authed on this machine)
 brew install ngrok
 ngrok config add-authtoken <token>
-ngrok http <PORT from .env>   # update APP_SERVER_PUBLIC_URL with the URL this prints
+ngrok http --url=https://catcall-desktop-mankind.ngrok-free.dev <PORT from .env>
+# APP_SERVER_PUBLIC_URL is already set to this domain in .env.example — no edit needed
 
 npm run dev:app   # or: npx tsx app-server/src/index.ts
 ```
