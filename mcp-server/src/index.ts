@@ -23,7 +23,13 @@ server.tool(
   'Trigger a real phone call toward a business objective. Returns almost ' +
     'immediately with {callId, dashboardUrl}. ALWAYS tell the user the ' +
     "dashboard URL right away, then call wait_for_call_result — don't wait " +
-    'for the call to finish before sharing the link.',
+    'for the call to finish before sharing the link. ' +
+    'CALENDAR: for a booking/reschedule, FIRST use your Google Calendar ' +
+    'connector to check the user is free, then pass that verified time as ' +
+    'calendarSlot (this app server never touches calendar credentials — you ' +
+    'own the calendar). AFTER wait_for_call_result comes back goal_met, use ' +
+    'the calendar connector again to add the confirmed event AND set a ' +
+    'reminder for it.',
   {
     phoneNumber: z.string().describe('E.164 phone number to dial, e.g. +15551234567'),
     businessName: z.string(),
@@ -63,7 +69,9 @@ server.tool(
   'wait_for_call_result',
   'Blocks until the call finishes, returns the final outcome (transcript, ' +
     'receipt). Call this immediately after start_call, after the dashboard ' +
-    'link has already been shared with the user.',
+    'link has already been shared with the user. When the receipt outcome is ' +
+    'goal_met for a booking/reschedule, add the confirmed time to the ' +
+    "user's Google Calendar via your connector and set a reminder.",
   {
     callId: z.string(),
   },

@@ -1,8 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { CallOutcome } from '@callstack/shared';
-import { requireCall } from '../state/call-state.js';
+import { getCall, requireCall } from '../state/call-state.js';
 import {
-  broadcastAskHuman,
   broadcastMilestone,
   broadcastReasoning,
   broadcastStatus,
@@ -12,7 +11,6 @@ import {
 import { buildOpeningLine, buildSystemPrompt, WRAP_UP_NUDGE } from '../brain/system-prompt.js';
 import { getBrainTurn, type ChatMessage } from '../brain/groq-client.js';
 import { decideClassification } from '../decision/classify-answer.js';
-import { decideConfidence } from '../decision/confidence.js';
 import { pressDigit } from '../decision/dtmf-navigate.js';
 import { decideDropRecovery } from '../decision/drop-recovery.js';
 import { detectLanguage, type CallLanguage } from '../decision/language-detect.js';
@@ -199,27 +197,37 @@ async function runBrainTurn(
     state.wrapUpNudged = true;
   }
 
-  // Live steering (§9.2) — instructions typed on the dashboard fold into
-  // the brain's next turn as a system message.
-  if (state.liveInstructions.length > 0) {
-    for (const instruction of state.liveInstructions) {
-      history.push({ role: 'system', content: `Human operator says: ${instruction}` });
-    }
-    state.liveInstructions = [];
+  // Live steering (§9.2) — instructions typed on the dashboard. Record them
+  // in history so later turns still remember them, but the ENFORCING copy
+  // goes at the very end of the transient prompt below (recency is what
+  // makes a small model actually obey — buried mid-history it got ignored,
+  // which is why typing "8pm" appeared to do nothing).
+  const pendingInstructions = state.liveInstructions.splice(0);
+  for (const instruction of pendingInstructions) {
+    history.push({ role: 'system', content: `Supervisor instruction: ${instruction}` });
   }
 
   if (callerText) history.push({ role: 'user', content: callerText });
+  messageHistory.set(callId, history);
 
-  // §3.3 S9.4 — detect language from what was just said, THEN place the
-  // Japanese-script instruction as the very last message before generation
-  // (a one-time nudge earlier in history wasn't sticky enough — recency
-  // matters much more for a small model's compliance).
+  // Build the transient prompt with the strongest, most-recent nudges LAST.
+  const trailing: ChatMessage[] = [];
+  if (pendingInstructions.length > 0) {
+    trailing.push({
+      role: 'system',
+      content: `The human supervisor is steering this call and just told you: "${pendingInstructions.join('; ')}". Do exactly this in your very next spoken reply, right now.`,
+    });
+  }
+  // §3.3 S9.4 — detect language from what was just said, then place the
+  // Japanese-script reminder last too (transient, not persisted, so it
+  // doesn't stack up every Japanese turn).
   const language = maybeSwitchLanguage(ws, callId, callerText);
   if (language === 'ja') {
-    history.push({ role: 'system', content: JAPANESE_SCRIPT_REMINDER });
+    trailing.push({ role: 'system', content: JAPANESE_SCRIPT_REMINDER });
   }
+  const promptMessages = trailing.length > 0 ? [...history, ...trailing] : history;
 
-  const result = await getBrainTurn(history, language);
+  const result = await getBrainTurn(promptMessages, language);
 
   // A newer turn (interrupt/redial) superseded this one — drop it.
   if (activeTurnId.get(callId) !== myTurnId) return;
@@ -239,17 +247,6 @@ async function runBrainTurn(
   for (const call of result.toolCalls) {
     await executeToolCall(ws, callId, call.name, call.args);
   }
-
-  // §9.6 — two consecutive low-confidence turns escalate via ask_human.
-  const confidenceDecision = decideConfidence(result.spokenReply, state.lowConfidenceStreak);
-  state.lowConfidenceStreak = confidenceDecision.streak;
-  if (confidenceDecision.action === 'escalate') {
-    state.machine = 'ASK_HUMAN';
-    broadcastAskHuman(
-      callId,
-      'The AI seems unsure two turns in a row — want to jump in?',
-    );
-  }
 }
 
 async function executeToolCall(
@@ -262,6 +259,13 @@ async function executeToolCall(
 
   switch (name) {
     case 'classify_answer': {
+      // "First turn only" (§6.1) — but the model routinely re-calls this on
+      // later turns. Once we've already committed to a branch, IGNORE it:
+      // honoring a stray re-classification mid-call is what made the AI
+      // start pressing menu digits at a live human it had already been
+      // talking to. Only the very first classification is allowed to route.
+      if (state.classification) return;
+
       const classification = args.classification as 'human' | 'menu' | 'voicemail';
       const confidence = Number(args.confidence ?? 0);
       const decision = decideClassification(classification, confidence);
@@ -281,16 +285,26 @@ async function executeToolCall(
     }
 
     case 'press_dtmf': {
+      // Only ever send DTMF while actually navigating a phone menu — never
+      // to a human. The model sometimes emits press_dtmf mid-human-call;
+      // gating on the machine state stops it dialing digits at a person.
+      if (state.machine !== 'MENU') return;
       const digit = String(args.digit ?? '');
       const decision = pressDigit(state.dtmfHistory, digit);
       state.dtmfHistory = decision.history;
       send(ws, { type: 'sendDigits', digits: digit });
       if (decision.deadEnd) {
-        state.machine = 'ASK_HUMAN';
-        broadcastAskHuman(
-          callId,
-          `Stuck in a menu loop pressing ${digit} repeatedly — how should I navigate?`,
-        );
+        // Menu loop detected — surface it for the operator, but keep the
+        // call moving (no blocking popup). A system nudge tells the brain
+        // to stop looping and try reaching a person instead.
+        broadcastReasoning(callId, `Menu dead-end: pressed ${digit} in a loop — trying to reach a person.`);
+        const history = messageHistory.get(callId);
+        if (history) {
+          history.push({
+            role: 'system',
+            content: 'You are stuck in a repeating menu loop. Stop pressing that digit; say "operator" or press 0 to reach a person.',
+          });
+        }
       }
       return;
     }
@@ -301,11 +315,34 @@ async function executeToolCall(
       // calendar credentials).
       const proposedTime = String(args.proposedTime ?? '');
       const slot = state.request.calendarSlot;
-      const matches = !!slot && proposedTime.trim() === slot.start.trim();
+      const history = messageHistory.get(callId);
+      if (!slot) {
+        // No calendar slot was pre-verified for this call, so there's
+        // nothing to check against. Without this the model looped forever
+        // ("let me check the schedule…") never committing. Tell it to just
+        // accept the caller's proposed time and move to confirm_booking.
+        broadcastReasoning(callId, `check_slot_availability: no pre-verified slot — accepting "${proposedTime}".`);
+        if (history) {
+          history.push({
+            role: 'system',
+            content: `No calendar to check — "${proposedTime}" is fine. Accept it now and call confirm_booking; do NOT say you're checking again.`,
+          });
+        }
+        return;
+      }
+      const matches = proposedTime.trim() === slot.start.trim();
       broadcastReasoning(
         callId,
-        `check_slot_availability: proposed="${proposedTime}" confirmedSlot="${slot?.start ?? 'none'}" -> ${matches ? 'match' : 'no match'}`,
+        `check_slot_availability: proposed="${proposedTime}" confirmedSlot="${slot.start}" -> ${matches ? 'match' : 'no match'}`,
       );
+      if (history) {
+        history.push({
+          role: 'system',
+          content: matches
+            ? `"${proposedTime}" matches the confirmed slot — accept it and call confirm_booking.`
+            : `"${proposedTime}" does not match the confirmed slot (${slot.label ?? slot.start}). Propose the confirmed slot instead.`,
+        });
+      }
       return;
     }
 
@@ -325,12 +362,12 @@ async function executeToolCall(
     }
 
     case 'ask_human': {
-      state.machine = 'ASK_HUMAN';
-      broadcastAskHuman(
-        callId,
-        String(args.question ?? ''),
-        args.options as string[] | undefined,
-      );
+      // HITL popup removed — stalling a live call to wait on a dashboard
+      // answer created dead air and felt broken. Log the model's question
+      // for the operator to see, but DON'T pause: the AI keeps the call
+      // moving on its own best judgment (its spokenReply this turn already
+      // covers what it says out loud), which keeps the call natural.
+      broadcastReasoning(callId, `ask_human (not blocking): ${String(args.question ?? '')}`);
       return;
     }
 
@@ -347,21 +384,19 @@ async function executeToolCall(
   }
 }
 
-/** §9.2 — dashboard answers fold in and proactively resume the conversation. */
-export async function resumeWithHumanAnswer(
-  ws: WebSocket,
-  callId: string,
-  answer: string,
-): Promise<void> {
-  const state = requireCall(callId);
-  state.pendingHumanQuestion = undefined;
-  state.machine = 'CONVERSING';
-  const history = messageHistory.get(callId) ?? [
-    { role: 'system', content: buildSystemPrompt(state.request) },
-  ];
-  history.push({ role: 'system', content: `Human operator answered: ${answer}` });
-  messageHistory.set(callId, history);
-  await runBrainTurn(ws, callId, '');
+/**
+ * §9.2 live steering — an instruction typed on the dashboard. Queues it and,
+ * if the call is live, fires a brain turn IMMEDIATELY (empty caller text) so
+ * the AI acts on it right away instead of waiting for the caller to speak.
+ */
+export async function steerCall(callId: string, instruction: string): Promise<void> {
+  const state = getCall(callId);
+  if (!state) return;
+  state.liveInstructions.push(instruction);
+  const ws = activeCallSockets.get(callId);
+  if (ws && state.machine !== 'END') {
+    await runBrainTurn(ws, callId, '');
+  }
 }
 
 /** §9.3 — dropped-call recovery: auto-redial (max 2 attempts) with resume context. */

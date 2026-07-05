@@ -8,15 +8,13 @@ const pulseEl = document.getElementById('pulse');
 const transcriptEl = document.getElementById('transcript');
 const reasoningLog = document.getElementById('reasoning-log');
 const instructionInput = document.getElementById('instruction-input');
-const askHumanPopup = document.getElementById('ask-human-popup');
-const askHumanQuestion = document.getElementById('ask-human-question');
-const askHumanOptions = document.getElementById('ask-human-options');
-const askHumanFreetext = document.getElementById('ask-human-freetext');
-const askHumanSubmit = document.getElementById('ask-human-submit');
-const resultOverlay = document.getElementById('result-overlay');
+const resultCard = document.getElementById('result-card');
+const resultClose = document.getElementById('result-close');
 const resultTitle = document.getElementById('result-title');
 const resultSummary = document.getElementById('result-summary');
 const resultMeta = document.getElementById('result-meta');
+
+resultClose.addEventListener('click', () => { resultCard.hidden = true; });
 
 let startTime = null;
 let timerHandle = null;
@@ -39,22 +37,10 @@ if (!callId) {
   instructionInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && instructionInput.value.trim()) {
       ws.send(JSON.stringify({ type: 'instruction', text: instructionInput.value.trim() }));
+      appendBubble('system', `Instruction sent: ${instructionInput.value.trim()}`);
       instructionInput.value = '';
     }
   });
-
-  askHumanSubmit.addEventListener('click', () => {
-    const answer = askHumanFreetext.value.trim();
-    if (!answer) return;
-    ws.send(JSON.stringify({ type: 'ask_human_answer', answer }));
-    askHumanPopup.hidden = true;
-    askHumanFreetext.value = '';
-  });
-
-  window.submitAskHumanOption = (answer) => {
-    ws.send(JSON.stringify({ type: 'ask_human_answer', answer }));
-    askHumanPopup.hidden = true;
-  };
 }
 
 function handleEvent(event) {
@@ -83,25 +69,22 @@ function handleEvent(event) {
       reasoningLog.scrollTop = reasoningLog.scrollHeight;
       break;
     }
-    case 'ask_human':
-      askHumanQuestion.textContent = event.question;
-      askHumanOptions.innerHTML = (event.options || [])
-        .map((o) => `<button onclick="submitAskHumanOption(${JSON.stringify(o)})">${escapeHtml(o)}</button>`)
-        .join('');
-      askHumanPopup.hidden = false;
-      break;
-    case 'result':
+    case 'result': {
       clearInterval(timerHandle);
       setPulse('listening');
+      const good = event.receipt.outcome === 'goal_met' || event.receipt.outcome === 'voicemail_left';
+      document.getElementById('result-icon').textContent = good ? '✓' : '!';
+      resultCard.style.borderLeftColor = good ? 'var(--success)' : 'var(--danger)';
       resultTitle.textContent = event.receipt.outcome.replace(/_/g, ' ');
       resultSummary.textContent = event.receipt.summary;
       resultMeta.textContent = `${(event.receipt.durationMs / 1000).toFixed(0)}s` +
         (event.receipt.quotedPrice ? ` · quoted ${event.receipt.quotedPrice}` : '') +
         (event.receipt.confirmedDetail ? ` · ${event.receipt.confirmedDetail}` : '');
-      resultOverlay.hidden = false;
+      resultCard.hidden = false;
       statusText.textContent = 'Call ended';
       statusSub.textContent = humanizeStatus(event.receipt.outcome);
       break;
+    }
   }
 }
 
@@ -139,10 +122,4 @@ function humanizeStatus(status) {
 
 function humanizeMachine(machine) {
   return String(machine || '').replace(/_/g, ' ').toLowerCase();
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
 }

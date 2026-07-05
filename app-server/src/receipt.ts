@@ -1,6 +1,10 @@
 import type { CallOutcome, CallReceipt, CallSessionState } from '@callstack/shared';
 
-const PRICE_RE = /\$(\d+(\.\d+)?)/;
+// Capture prices in the currencies this actually gets used with — dollars,
+// yen (¥ or the word/kanji), euros, pounds. Yen was invisible before: a
+// negotiated ¥1500 never showed up on the receipt because only "$" matched.
+const PRICE_RE =
+  /(?:[$€£¥]\s?\d[\d,]*(?:\.\d+)?)|(?:\d[\d,]*(?:\.\d+)?\s?(?:yen|円|ドル|dollars?|euros?|pounds?))/i;
 
 /**
  * §9.5 — rule-based summary, no extra LLM call. Instant, no added latency
@@ -17,7 +21,7 @@ export function buildReceipt(
   const quotedLine = [...state.transcript]
     .reverse()
     .find((t) => PRICE_RE.test(t.text));
-  const quotedPrice = quotedLine?.text.match(PRICE_RE)?.[0];
+  const quotedPrice = quotedLine?.text.match(PRICE_RE)?.[0]?.trim();
 
   const durationMs = state.startedAt
     ? (state.endedAt ?? Date.now()) - state.startedAt

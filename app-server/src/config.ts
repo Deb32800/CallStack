@@ -13,7 +13,18 @@ export const config = {
     phoneNumber: required('TWILIO_PHONE_NUMBER'),
   },
   groq: {
-    apiKey: required('GROQ_API_KEY'),
+    // One or more API keys, comma-separated, for automatic rotation when a
+    // key hits its daily token limit (§7 — the Groq free tier caps tokens
+    // per day per model; rotating across keys keeps calls working). Deduped
+    // so an accidentally-repeated key doesn't waste a rotation slot.
+    apiKeys: [
+      ...new Set(
+        required('GROQ_API_KEY')
+          .split(',')
+          .map((k) => k.trim())
+          .filter(Boolean),
+      ),
+    ],
     model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
     // T3 (eng review §14): on the 1.8s timeout retry, fall back to the 8B
     // model instead of repeating the 70B call.
