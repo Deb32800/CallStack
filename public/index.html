@@ -1,0 +1,59 @@
+<title>CallStack — Live Call</title>
+<link rel="stylesheet" href="dashboard.css" />
+
+<div id="bg">
+  <div class="glow glow-a"></div>
+  <div class="glow glow-b"></div>
+  <div class="glow glow-c"></div>
+</div>
+
+<div id="app">
+  <header id="status-bar" class="glass">
+    <div id="status-left">
+      <div id="pulse" class="pulse listening">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div>
+        <div id="status-text">Connecting…</div>
+        <div id="status-sub">—</div>
+      </div>
+    </div>
+    <div id="timer">00:00</div>
+  </header>
+
+  <main>
+    <section id="transcript-panel" class="glass">
+      <h3>Live transcript</h3>
+      <div id="transcript"></div>
+    </section>
+    <aside id="reasoning-panel" class="glass">
+      <h3>Reasoning</h3>
+      <div id="reasoning-log"></div>
+    </aside>
+  </main>
+
+  <footer id="instruction-bar" class="glass">
+    <input id="instruction-input" type="text" placeholder="Type a live instruction and press Enter…" />
+  </footer>
+
+  <div id="ask-human-popup" class="glass" hidden>
+    <div class="popup-label">Human input needed</div>
+    <p id="ask-human-question"></p>
+    <div id="ask-human-options"></div>
+    <div class="freetext-row">
+      <input id="ask-human-freetext" type="text" placeholder="Or type an answer…" />
+      <button id="ask-human-submit">Send</button>
+    </div>
+  </div>
+
+  <div id="result-overlay" hidden>
+    <div id="result-card">
+      <div id="result-icon">✓</div>
+      <h2 id="result-title"></h2>
+      <p id="result-summary"></p>
+      <div id="result-meta"></div>
+    </div>
+  </div>
+</div>
+
+<script src="dashboard.js"></script>

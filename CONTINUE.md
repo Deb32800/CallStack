@@ -1,66 +1,98 @@
 # CONTINUE — cross-laptop handoff
 
-Last updated: 2026-07-05. Read this first when resuming on another machine.
+Last updated: 2026-07-05 (post first live call). Read this first when resuming.
 
 ## Where we are right now
 
-**Scaffold is done and committed. No dependencies installed yet. No call-flow code yet.**
+**Phases 1-5 are built and working end-to-end against a real phone call.**
+Full call flow (Twilio dial → ConversationRelay → ElevenLabs TTS → Google STT →
+Groq brain → tool calls → receipt) verified live to +819091644892 on 2026-07-05.
 
 Done:
-- npm workspace scaffolded: `shared/`, `app-server/`, `mcp-server/` (§8 layout).
-- `shared/src/types.ts` — full type contract between all packages (done).
-- Root `package.json` (workspaces), `tsconfig.base.json`, per-package `package.json` + `tsconfig.json`.
-- Dev model: **tsx** for running (no build step), **`npm run typecheck`** (tsc --noEmit) to validate.
-- GitHub connected + pushed. GBrain on Supabase (shared across laptops) — see CLAUDE.md §13.
-- Eng review CLEARED — build decisions locked in CLAUDE.md §14.
+- `shared/src/types.ts` — full type contract.
+- `app-server/src/` — config, state, auth (shared-secret + Twilio signature),
+  business-hours, routes (calls/twiml/status-callback/subscribe), `decision/`
+  pure functions (state-machine, classify-answer, confidence, dtmf-navigate,
+  drop-recovery, language-detect), `brain/` (system-prompt, tools with the
+  spokenReply load-time guard, groq-client with 1.8s timeout + 8B fallback),
+  `ws/` (conversation-relay-handler, dashboard-handler), call-lifecycle,
+  receipt, index.ts.
+- `mcp-server/src/` — start_call, wait_for_call_result, send_sms_confirmation.
+- `public/` — full glassmorphic dashboard (gradient bg, glass panels, chat
+  bubbles, voice-pulse, ask-human popup, celebratory result card) per §5.
+- S9.3 drop recovery, S9.5 receipt, S9.6 confidence escalation — all wired
+  into the ws handler.
+- S9.4 EN/JP language switching — built (regex JP detection, `<Language>`
+  TwiML child tag, outbound `language` WS message), **not yet verified on a
+  real Japanese-language call** — do that before relying on it live.
+- MCP server registered in Claude Desktop's config
+  (`~/Library/Application Support/Claude/claude_desktop_config.json` →
+  `mcpServers.callstack`) — **restart Claude Desktop to pick it up.**
 
-Not done yet (build order below):
-- `npm install` (not run — do this first on the new laptop).
-- Everything in `app-server/src/` and `mcp-server/src/` (only package.json/tsconfig exist).
+Not done / deliberately cut:
+- Compare mode (S9.1) — Tier 4, cut per CLAUDE.md §11 time-boxing.
+- Unit tests for `decision/` (T4) and the spokenReply schema test (T5) — T5's
+  guard exists as a runtime assertion in `brain/tools.ts` instead of a
+  standalone test file.
+- ElevenLabs voice is still the default Amelia — the API key on this account
+  is scoped without `voices_read`/`user_read`, so voice browsing wasn't
+  possible; user chose to keep the default rather than widen the key.
+
+## Known environment gotchas (this machine, 2026-07-05)
+
+- **Port 3000 is occupied by an unrelated Next.js dev server** (a different
+  project, PID varies, `next-server (v16.1.6)`). The app-server runs on
+  **3001** here — `.env` has `PORT=3001`. Don't "fix" this by killing that
+  process; it's not part of this project.
+- **ngrok URL is ephemeral.** Every time the tunnel restarts, the URL
+  changes. When that happens, update it in BOTH places:
+  1. `.env` → `APP_SERVER_PUBLIC_URL`
+  2. `~/Library/Application Support/Claude/claude_desktop_config.json` →
+     `mcpServers.callstack.env.APP_SERVER_PUBLIC_URL`
+  Then restart the app-server (env is loaded once at boot) and restart
+  Claude Desktop (same reason).
+- ngrok requires `ngrok config add-authtoken <token>` once per machine
+  (account is free, token from https://dashboard.ngrok.com/get-started/your-authtoken).
+- Twilio account is a **Trial** account — can only dial pre-verified numbers
+  (Console → Phone Numbers → Verified Caller IDs). +819091644892 and
+  +817044836092 are verified as of 2026-07-05.
 
 ## Resume steps on the new laptop
 
 ```bash
-# 1. clone
 git clone https://github.com/Deb32800/CallStack.git && cd CallStack
-
-# 2. connect gbrain to the SHARED Supabase brain (see CLAUDE.md §13 for details)
-export GBRAIN_DISABLE_DIRECT_POOL=1
-GBRAIN_DATABASE_URL="postgresql://postgres.wpsbzpyhnyxyiofayiet:<DB_PASSWORD>@aws-0-us-east-1.pooler.supabase.com:5432/postgres" \
-  GBRAIN_DISABLE_DIRECT_POOL=1 gbrain init --non-interactive
-claude mcp add --scope user gbrain -e GBRAIN_DISABLE_DIRECT_POOL=1 -- "$(command -v gbrain)" serve
-
-# 3. install deps
 npm install
-
-# 4. typecheck to confirm the scaffold is clean
 npm run typecheck
 
-# 5. read the project status page from the shared brain
-gbrain get callstack-project-status
+# .env is gitignored — copy values from .env.example and fill in real
+# secrets (ask the user, or pull from the other laptop's .env directly,
+# never commit it).
+cp .env.example .env
+
+# ngrok (only if not already installed/authed on this machine)
+brew install ngrok
+ngrok config add-authtoken <token>
+ngrok http <PORT from .env>   # update APP_SERVER_PUBLIC_URL with the URL this prints
+
+npm run dev:app   # or: npx tsx app-server/src/index.ts
 ```
 
-Then tell Claude Code: "read CONTINUE.md and CLAUDE.md, then continue the build from Phase 2."
-
-## Build order (priority: working call + low latency FIRST)
-
-- [x] **Phase 1 — Scaffold** (done, committed)
-- [ ] **Phase 2 — Core call** (`app-server/src/`): config, state/call-state (Map), auth (shared-secret + twilio-signature), routes/calls.ts, routes/twiml.ts (ConversationRelay), routes/status-callback.ts, business-hours, index.ts (express + ws). Goal: a call dials. Place ONE trivial test call ("say hello, then goodbye") — checkpoint 2. **Gate T1: verify ElevenLabs key/linkage in Twilio Console before dialing.**
-- [ ] **Phase 3 — Brain + decision + WS** (the priority): brain/system-prompt, brain/tools (6 tools, all with `spokenReply`), brain/groq-client (1.8s timeout + llama-3.1-8b-instant fallback). decision/ pure fns. ws/conversation-relay-handler. Real adaptive call working, low latency.
-- [ ] **Phase 4 — mcp-server**: start_call, wait_for_call_result, send_sms_confirmation, app-server-client.
-- [ ] **Phase 5 — Dashboard** (`public/`): glassmorphic live transcript, §5.
-- [ ] **Phase 6 — receipt + drop-recovery + unit tests** (T4 decision/ tests, T5 spokenReply schema test).
-- [ ] Tier 3+: EN/JP language switch, HITL. Tier 4 (cut unless ahead): compare mode.
-
-## API keys still needed (ask the user, put in `.env` — never commit)
-
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`
-- `GROQ_API_KEY`
-- `ELEVENLABS_API_KEY` (+ confirm it's linked in the Twilio Console — eng decision T1)
-- `APP_SERVER_SHARED_SECRET` (generate: `openssl rand -hex 32`)
-- `APP_SERVER_PUBLIC_URL` = your ngrok URL (eng decision T2: ngrok, not Azure, for the demo)
+Then update `claude_desktop_config.json`'s `mcpServers.callstack` block (see
+above) with this machine's absolute paths + the fresh ngrok URL, and restart
+Claude Desktop.
 
 ## Locked eng decisions (CLAUDE.md §14)
 
-T1 verify ElevenLabs before first call · T2 ngrok not Azure · T3 Groq 8B fallback on retry ·
-T4 unit-test decision/ · T5 assert every tool has spokenReply · T6 no redeploy during demo · T7 confirm JP voice name before S9.4.
+T1 verify ElevenLabs before first call (done, confirmed working) · T2 ngrok
+not Azure (done) · T3 Groq 8B fallback on retry (done) · T4 unit-test
+decision/ (not done) · T5 assert every tool has spokenReply (done, as a
+runtime guard) · T6 no redeploy during demo · T7 confirm JP voice name before
+S9.4 (superseded — ElevenLabs flash_v2_5 is multilingual, same voice used for
+both languages, but the JP call itself is still unverified).
+
+## Next candidates (not started)
+
+- Live-test the EN/JP switch with an actual Japanese-speaking call.
+- Unit tests for `decision/` (T4) and the tools schema guard (T5) as
+  standalone test files rather than the current runtime assertion.
+- Consider compare mode (S9.1) only if there's real time to spare.
