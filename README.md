@@ -6,7 +6,7 @@ Ask Claude in plain language: "Call this clinic and book me a check-up next week
 
 ---
 
-## The problem
+## The Problem
 
 If you live in a country whose language you do not speak fluently, the phone is a wall. A large share of everyday services in Japan and many other places still run on phone calls: clinics, salons, restaurants, landlords, delivery, city offices, repair services. A booking that takes a native speaker two minutes becomes something a foreigner avoids, postpones, or pays someone else to do.
 
@@ -14,7 +14,7 @@ The barrier is not only language. It is the live, unscripted nature of a phone c
 
 This is a daily friction for foreign residents, students, tourists, and anyone with a hearing or speech difficulty. It is also a friction for the businesses, which lose customers who simply give up.
 
-## The solution
+## The Solution
 
 CallStack gives Claude a real phone line through the Model Context Protocol. You describe the task in the language you are comfortable in. Claude places the call, discloses that it is an assistant calling on your behalf, and then handles whatever happens:
 
