@@ -319,3 +319,29 @@ Submission requires (per the event's luma page): a problem statement + solution 
 - ~55-60s: the live call itself. Don't narrate over dead air — have the call already dialing before you start talking, so judges see the dashboard's live transcript update in real time while you talk over it. A REAL phone ringing live in front of judges is the single most memorable thing you can do; most other teams will be presenting a screen recording of a chat UI.
 - ~15-20s: land on the outcome (booking confirmed / call resolved), then close with the explicit theme statement: "this is agent-first software — Claude gets a new tool, a phone line, via MCP."
 
+---
+
+## 13. Shared GBrain (cross-laptop continuation) — configured 2026-07-05
+
+The gbrain knowledge base lives on **Supabase Postgres** so any laptop can pick up with full context. To connect a second machine:
+
+1. Get the **Session Pooler** URL from Supabase → Settings → Database → Connection Pooler → Session (host `aws-0-us-east-1.pooler.supabase.com`, port `5432`, project ref `wpsbzpyhnyxyiofayiet`).
+2. Point gbrain at it (env-var method, NOT `--url` which mis-parses):
+   ```
+   GBRAIN_DATABASE_URL="postgresql://postgres.wpsbzpyhnyxyiofayiet:<DB_PASSWORD>@aws-0-us-east-1.pooler.supabase.com:5432/postgres" \
+     GBRAIN_DISABLE_DIRECT_POOL=1 gbrain init --non-interactive
+   ```
+3. **Gotcha (baked in):** Supabase's direct DB host `db.<ref>.supabase.co` is **IPv6-only** and unreachable on typical networks. gbrain tries it for DDL/migrations and fails with `getaddrinfo ENOTFOUND`. Fix: always set `GBRAIN_DISABLE_DIRECT_POOL=1` (routes DDL through the session pooler, which handles `ALTER TABLE` fine). Add `export GBRAIN_DISABLE_DIRECT_POOL=1` to your shell profile, and register the MCP with it: `claude mcp add --scope user gbrain -e GBRAIN_DISABLE_DIRECT_POOL=1 -- $(command -v gbrain) serve`.
+4. Never commit the DB password or the Supabase service_role key — they stay in `~/.gbrain/config.json` (0600) and env only.
+
+## 14. Eng-review build decisions (2026-07-05, /plan-eng-review — CLEARED)
+
+Locked before implementation. Build order per §10, cut priority per §11.
+- **T1 (P1):** Verify ElevenLabs key/linkage in the Twilio Console BEFORE the checkpoint-2 call (§2 open question). Don't dial until confirmed.
+- **T2 (P1):** Use **ngrok** as `APP_SERVER_PUBLIC_URL` for build + demo; defer Azure (§7 #9 disabled-sub risk).
+- **T3 (P2):** On the Groq 1.8s-timeout retry, fall back to `llama-3.1-8b-instant` (env `GROQ_FALLBACK_MODEL`) instead of repeating the 70B (§6.4).
+- **T4 (P2):** Unit-test all `decision/` pure functions (state-machine, classify-answer, confidence, dtmf-navigate, drop-recovery, business-hours, receipt).
+- **T5 (P2, CRITICAL):** Schema test asserting **every brain tool includes `spokenReply`** (guards the §6.2 gotcha — the worst live-call failure).
+- **T6 (P3):** Known limitation — single-replica in-memory state; **do not redeploy during the demo** (kills active calls + defeats drop-recovery).
+- **T7 (P3):** Confirm the exact Japanese Polly neural voice name before building S9.4 (§3.3 unconfirmed).
+
