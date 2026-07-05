@@ -1,0 +1,27 @@
+# ---- Secrets (NEVER commit) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+**/service-key*
+supabase-key*
+
+# ---- Node ----
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# ---- Local / OS ----
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# ---- gbrain / gstack local state (machine-specific, never share) ----
+.gbrain/
+.gstack/
