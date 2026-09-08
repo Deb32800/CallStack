@@ -4,6 +4,9 @@ A phone line for your AI agent. CallStack is an MCP server that lets Claude make
 
 Ask Claude in plain language: "Call this clinic and book me a check-up next week," or "Call these three cleaners, ask their price, and tell me the cheapest." Claude makes the call, works the objective, and hands you a live dashboard to watch and steer it in real time.
 
+DEMO: https://drive.google.com/drive/folders/1NriMLCMCuxwtSUHVrnmYyfBgnHZKMn4i?usp=sharing
+
+
 ---
 
 ## The Problem
